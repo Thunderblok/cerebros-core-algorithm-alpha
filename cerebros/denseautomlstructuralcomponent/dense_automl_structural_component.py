@@ -4,6 +4,8 @@ import tensorflow as tf
 import jax.numpy as jnp
 from jax import jit
 import numpy as np
+from cerebros.utils.probability import clamp_probability
+import warnings
 
 
 @jit
@@ -37,6 +39,24 @@ def jit_sigmoid(x):
 def simple_sigmoid(x):
     s = jit_sigmoid(x)
     return s.__float__()
+
+
+def _clamp_probability(value: float, name: str) -> float:
+    """
+    Clamp a probability-like hyperparameter into [0,1] with a warning.
+    This prevents silent runaway connectivity when >1 is supplied.
+    """
+    if value is None:
+        return value
+    try:
+        v = float(value)
+    except Exception:
+        warnings.warn(f"[cerebros] {name}={value} not numeric; leaving unchanged.")
+        return value
+    if v < 0 or v > 1:
+        warnings.warn(f"[cerebros] {name}={v} outside [0,1]; clamping.")
+        v = max(0.0, min(1.0, v))
+    return v
 
 
 # @jit
@@ -204,13 +224,28 @@ class DenseLateralConnectivity:
         self.gate_after_n_lateral_connections =\
             gate_after_n_lateral_connections
         self.gate_activation_function = gate_activation_function
-        self.__p_lateral_connection = p_lateral_connection  # not updated
-        self.p_lateral_connection = p_lateral_connection  # Updated
+        # Store original (pre-clamped) value for introspection/debugging
+        self.__p_lateral_connection = p_lateral_connection  # raw (original user value)
+        self.p_lateral_connection = _clamp_probability(p_lateral_connection, "p_lateral_connection")  # Updated
         self.p_lateral_connection_decay = p_lateral_connection_decay
         self.num_lateral_connection_tries_per_unit = \
             num_lateral_connection_tries_per_unit
         self.n_consecutive_ungated_connections = 0
         self.n_consecutive_connections = 0
+
+    @property
+    def raw_p_lateral_connection(self):
+        """Return the originally provided (unclamped) probability value."""
+        return self.__p_lateral_connection
+
+    def update_p_lateral_connection(self, new_p: float):
+        """Update the operative lateral connection probability (clamped).
+
+        This method preserves the invariant that runtime probability values
+        remain inside [0, 1]. The raw/original value is not mutated so that
+        callers can still inspect the pre-clamped intent if needed.
+        """
+        self.p_lateral_connection = clamp_probability(new_p)
 
     def gate_or_not(self):
         if self.n_consecutive_ungated_connections % \
@@ -233,8 +268,10 @@ class DenseLateralConnectivity:
                  self.p_lateral_connection_decay is '0.9 ** x',
                  and k_minus_n is set to 3, then the probability of
                  True being returned is 0.98 * 0.9 ** 3, or 0.71"""
-        p_connect_this_time = self.p_lateral_connection *\
+        p_connect_this_time = self.p_lateral_connection * \
             self.p_lateral_connection_decay(k_minus_n)
+        # Defensive clamp in case decay function returns an out-of-range value
+        p_connect_this_time = clamp_probability(p_connect_this_time)
         ran_0_1 = float(np.random.random())
         conn_or_not = self.n_consecutive_connections <= \
             self.max_consecutive_lateral_connections - 1 and \

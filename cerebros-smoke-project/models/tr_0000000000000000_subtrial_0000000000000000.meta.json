@@ -1,0 +1,9 @@
+{
+  "trial_number": 0,
+  "subtrial_number": 0,
+  "project_name": "cerebros-smoke-project",
+  "metric_to_rank_by": "loss",
+  "keras_version": "3.11.2",
+  "tf_version": "2.20.0",
+  "seed": 1234
+}
