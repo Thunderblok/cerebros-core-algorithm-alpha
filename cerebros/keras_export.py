@@ -44,10 +44,43 @@ def _tensor_name(t) -> str:
         return str(t)
 
 
+def _history_layer_of_tensor(t):
+    """Return producing layer for a Keras/TensorFlow tensor if available."""
+    for attr in ("_keras_history", "keras_history"):
+        if hasattr(t, attr):
+            hist = getattr(t, attr)
+            # Keras 3 may expose .layer; Keras 2 exposes tuple (layer, node_index, tensor_index)
+            layer = getattr(hist, "layer", None)
+            if layer is not None:
+                return layer
+            try:
+                return hist[0]
+            except Exception:
+                return None
+    return None
+
+
+def _upstream_layer_name_from_tensor(t) -> str:
+    layer = _history_layer_of_tensor(t)
+    return getattr(layer, "name", _tensor_name(t))
+
+
+def _flatten_inputs(obj):
+    if obj is None:
+        return []
+    if isinstance(obj, (list, tuple)):
+        out = []
+        for x in obj:
+            out.extend(_flatten_inputs(x))
+        return out
+    return [obj]
+
+
 def export_keras_to_graph(model) -> Dict[str, Any]:
     """Export a tf.keras.Model to a minimal DAG spec.
 
     Requires a Functional or Model graph (not a pure Sequential with no names).
+    Preserves multiplicity and order of inbound connections.
     """
     if tf is None:
         raise RuntimeError("TensorFlow not available; cannot export Keras model.")
@@ -57,23 +90,34 @@ def export_keras_to_graph(model) -> Dict[str, Any]:
     # Build list of nodes with inbound connections (layer order is already topological)
     for layer in model.layers:
         inputs: List[str] = []
+        # Prefer deriving from the actual input tensors to preserve duplicates and order
+        used_fallback = False
         try:
-            # Keras 2/TF 2.x
+            # Try node-based tensors first if available to reflect graph edges
             inbound_nodes = getattr(layer, "_inbound_nodes", [])
             for node in inbound_nodes:
-                in_layers = getattr(node, "inbound_layers", [])
-                if not isinstance(in_layers, (list, tuple)):
-                    in_layers = [in_layers]
-                for in_l in in_layers:
-                    if in_l is None:
-                        continue
-                    inputs.append(in_l.name)
+                kin = getattr(node, "keras_inputs", None) or getattr(node, "input_tensors", None)
+                if kin is not None:
+                    for t in _flatten_inputs(kin):
+                        inputs.append(_upstream_layer_name_from_tensor(t))
+                else:
+                    in_layers = getattr(node, "inbound_layers", [])
+                    if not isinstance(in_layers, (list, tuple)):
+                        in_layers = [in_layers]
+                    for in_l in in_layers:
+                        if in_l is None:
+                            continue
+                        inputs.append(in_l.name)
         except Exception:
-            pass
-
-        # Deduplicate while preserving order
-        seen = set()
-        inputs = [x for x in inputs if not (x in seen or seen.add(x))]
+            used_fallback = True
+        
+        if used_fallback or not inputs:
+            try:
+                tensors = getattr(layer, "input", None)
+                for t in _flatten_inputs(tensors):
+                    inputs.append(_upstream_layer_name_from_tensor(t))
+            except Exception:
+                pass
 
         nodes.append(
             {
