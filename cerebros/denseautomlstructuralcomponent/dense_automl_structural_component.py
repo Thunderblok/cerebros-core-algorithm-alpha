@@ -195,9 +195,11 @@ class DenseLateralConnectivity:
          gate_activation_function=tf.keras.activation.sigmoid:
             Which activation function to gate the output of one DenseUnit
             before making a lateral connection.
-         p_lateral_connection: int: defaults to: 1:
-            The probability of the first given DenseUnit on a level making a
-            lateral connection with the second DenseUnit.
+            p_lateral_connection: float: defaults to: 1:
+                Intensity (λ) governing expected lateral connection multiplicity between
+                successive DenseUnits on the same level. May exceed 1 (hyperdense regime)
+                and is NOT a Bernoulli probability. Values >1 yield multiple duplicate
+                lateral edges via floor(λ*decay) plus a fractional Bernoulli draw.
          p_lateral_connection_decay: object: defaults to: lambda x: 1 ** x
             A function that descreases or increases the probability of a
             lateral connection being made with a subsequent DenseUnit.
@@ -224,9 +226,20 @@ class DenseLateralConnectivity:
         self.gate_after_n_lateral_connections =\
             gate_after_n_lateral_connections
         self.gate_activation_function = gate_activation_function
-        # Store original (pre-clamped) value for introspection/debugging
-        self.__p_lateral_connection = p_lateral_connection  # raw (original user value)
-        self.p_lateral_connection = _clamp_probability(p_lateral_connection, "p_lateral_connection")  # Updated
+        # Store original (unmodified) value for introspection/debugging.
+        # IMPORTANT: This is NOT a Bernoulli probability. In Cerebros we sample
+        # upstream lateral connectivity WITH replacement allowing hyperdense
+        # duplicate edges. Values > 1 therefore represent an INTENSITY
+        # (expected multiplicity / rate) rather than a strict probability and
+        # MUST NOT be clamped into [0,1]. Prior clamping (a common AI refactor
+        # mistake) collapses the search space and prevents discovery of
+        # empirically optimal hyperdense regimes discovered via TPE / Sobol /
+        # Bayesian optimization (often p_lateral_connection >> 1).
+        self.__p_lateral_connection = float(p_lateral_connection)  # raw user supplied intensity
+        # For backward compatibility we expose the same attribute name; callers
+        # historically referenced `p_lateral_connection`. It now semantically
+        # means intensity λ, not necessarily a probability.
+        self.p_lateral_connection = float(p_lateral_connection)
         self.p_lateral_connection_decay = p_lateral_connection_decay
         self.num_lateral_connection_tries_per_unit = \
             num_lateral_connection_tries_per_unit
@@ -239,13 +252,16 @@ class DenseLateralConnectivity:
         return self.__p_lateral_connection
 
     def update_p_lateral_connection(self, new_p: float):
-        """Update the operative lateral connection probability (clamped).
+        """Update the operative lateral connection intensity (NOT clamped).
 
-        This method preserves the invariant that runtime probability values
-        remain inside [0, 1]. The raw/original value is not mutated so that
-        callers can still inspect the pre-clamped intent if needed.
+        Args:
+            new_p: New intensity (expected multiplicity baseline). May be > 1.
+        Notes:
+            We intentionally do not clamp; callers who *require* a Bernoulli
+            probability should map intensity λ to a probability themselves
+            (e.g., p = min(1., λ)) but that loses multiplicity information.
         """
-        self.p_lateral_connection = clamp_probability(new_p)
+        self.p_lateral_connection = float(new_p)
 
     def gate_or_not(self):
         if self.n_consecutive_ungated_connections % \
@@ -257,27 +273,48 @@ class DenseLateralConnectivity:
         return False
 
     def select_connection_or_not(self, k_minus_n):
-        """Determines whether to make a lateral connection. This should be
-        called once for each possible connection.
-        Arg:
-            k_minus_n: How many units to the left, a possible lateral
-            connection is upstream the possible connection is
-        Returns: A boolean where p(True) = self.p_lateral_connection *
-                 self.p_lateral_connection_decay(k_minus_n). In other
-                 words, if self.p_lateral_connection = .98 and
-                 self.p_lateral_connection_decay is '0.9 ** x',
-                 and k_minus_n is set to 3, then the probability of
-                 True being returned is 0.98 * 0.9 ** 3, or 0.71"""
-        p_connect_this_time = self.p_lateral_connection * \
-            self.p_lateral_connection_decay(k_minus_n)
-        # Defensive clamp in case decay function returns an out-of-range value
-        p_connect_this_time = clamp_probability(p_connect_this_time)
-        ran_0_1 = float(np.random.random())
-        conn_or_not = self.n_consecutive_connections <= \
-            self.max_consecutive_lateral_connections - 1 and \
-            ran_0_1 <= p_connect_this_time
-        if conn_or_not:
+        """Legacy boolean API indicating at least one lateral connection.
+
+        Historically `p_lateral_connection` was (incorrectly) treated as a
+        probability. It is now an intensity λ that may exceed 1. For backward
+        compatibility this method returns True if the sampled multiplicity is
+        >= 1, using the same gating / max consecutive logic as before.
+
+        Args:
+            k_minus_n: Horizontal offset (how far left the potential upstream
+                unit is) used in the decay function.
+        Returns:
+            bool indicating whether to create (at least) one connection.
+        """
+        multiplicity = self.sample_lateral_connection_multiplicity(k_minus_n)
+        has_connection = multiplicity > 0 and \
+            self.n_consecutive_connections <= (self.max_consecutive_lateral_connections - 1)
+        if has_connection:
+            # Treat any positive multiplicity as a single step in consecutive count.
             self.n_consecutive_connections += 1
         else:
             self.n_consecutive_connections = 0
-        return conn_or_not
+        return has_connection
+
+    def sample_lateral_connection_multiplicity(self, k_minus_n):
+        """Sample how many parallel lateral connections (duplicate edges) to add.
+
+        We model hyperdense selection via an intensity λ_k = λ * decay(k) where
+        λ = self.p_lateral_connection (user-provided). Rather than introduce a
+        heavy Poisson dependency, we implement a light deterministic + Bernoulli
+        decomposition: floor(λ_k) guaranteed connections plus one extra with
+        probability fractional(λ_k). This yields E[multiplicity] = λ_k while
+        remaining reproducible under seeding.
+
+        Args:
+            k_minus_n: Horizontal offset for decay evaluation.
+        Returns:
+            int multiplicity >= 0.
+        """
+        base_intensity = self.p_lateral_connection * self.p_lateral_connection_decay(k_minus_n)
+        if base_intensity <= 0:
+            return 0
+        whole = int(np.floor(base_intensity))
+        frac = base_intensity - whole
+        extra = 1 if np.random.random() < frac else 0
+        return whole + extra

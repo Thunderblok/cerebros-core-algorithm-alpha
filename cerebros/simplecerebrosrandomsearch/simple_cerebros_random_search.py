@@ -255,14 +255,14 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
                                  Which activation function to gate the output of one DenseUnit
                                  before making a lateral connection.
                  p_lateral_connection: float: defaults to 0.97,
-                                 The probability of the first given DenseUnit on a level making a
-                                 lateral connection with the second DenseUnit.
+                                 Intensity λ governing expected multiplicity of lateral connections
+                                 between successive DenseUnits on the same level. May exceed 1 (hyperdense
+                                 regime) and is NOT a Bernoulli probability. Duplicate edges arise via
+                                 floor(λ * decay(k)) plus an optional fractional Bernoulli component.
                  p_lateral_connection_decay: object: defaults to zero_95_exp_decay,
-                                 A function that descreases or increases the probability of a
-                                 lateral connection being made with a subsequent DenseUnit.
-                                 Accepts an unsigned integer x. returns a floating point number that
-                                 will be multiplied by p_lateral_connection where x is the number
-                                 of subsequent connections after the first
+                                 Function applied to horizontal offset k to scale intensity:
+                                 effective λ_k = λ * decay(k). Accepts an unsigned integer k and returns
+                                 a scalar multiplier (can increase or decrease density spatially).
                 num_lateral_connection_tries_per_unit: int: defaults to 1,
                 self.chart_network_graph: bool: default: False,
                                  Whether or not Cerebros will create visualizations of the neural
@@ -291,7 +291,7 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
                  maximum_units_per_level: int,
                  minimum_neurons_per_unit: int,
                  maximum_neurons_per_unit: int,
-                 validation_data: tuple=None,
+                 validation_data: tuple | None = None,
                  activation='elu',
                  final_activation=None,
                  number_of_architecture_moities_to_try=1,
@@ -312,7 +312,7 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
                  num_lateral_connection_tries_per_unit=1,
                  learning_rate=0.005,
                  loss="mse",
-                 metrics=[tf.keras.metrics.RootMeanSquaredError()],
+                 metrics=None,
                  epochs=7,
                  patience=7,
                  project_name='cerebros-auto-ml-test',
@@ -374,6 +374,9 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
         self.oracle_table = f'{self.project_name}_oracle'
         self.learning_rate = learning_rate
         self.loss = loss
+        if metrics is None:
+            # type: ignore[attr-defined] for tf.keras in some static analyzers
+            metrics = [tf.keras.metrics.RootMeanSquaredError()]  # type: ignore[attr-defined]
         self.metrics = metrics
         self.epochs = epochs
         self.batch_size = batch_size
@@ -446,10 +449,10 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
             for j in jnp.arange(num_units_this_level):
                 if int(i) != last_level:
                     __neural_network_spec[str(level_index)] =\
-                        self.parse_prototype_for_level(num_units_this_level)
+                        self.parse_prototype_for_level(num_units_this_level)  # type: ignore[assignment]
                 else:
                     __neural_network_spec[str(int(i) + 1)] =\
-                        self.outputs
+                        self.outputs  # type: ignore[assignment]
 
         self.__neural_network_spec = __neural_network_spec
 
@@ -524,7 +527,7 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
             "subtrial_number": int(subtrial_number),
             "project_name": self.project_name,
             "metric_to_rank_by": self.metric_to_rank_by,
-            "keras_version": tf.keras.__version__,
+            "keras_version": getattr(getattr(tf, 'keras', object()), '__version__', 'unknown'),  # type: ignore[attr-defined]
             "tf_version": tf.__version__,
             "seed": int(self.seed),
         }
@@ -641,8 +644,8 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
         return best
 
     def get_best_model(self):
-        best_model = tf.keras.models.load_model(self.best_model_path)
-        return best_model
+    best_model = tf.keras.models.load_model(self.best_model_path)  # type: ignore[attr-defined]
+    return best_model
 
 # ->
 
