@@ -1,5 +1,7 @@
 
 import numpy as np
+import argparse
+import sys
 # from multiprocessing import Pool  # , Process
 from cerebros.simplecerebrosrandomsearch.simple_cerebros_random_search\
     import SimpleCerebrosRandomSearch
@@ -26,6 +28,28 @@ TIME = pendulum.now().__str__()[:16]\
     .replace(':', '_')\
     .replace('-', '_')
 PROJECT_NAME = f'{TIME}_cerebros_auto_ml_test'
+
+# ---------------- CLI ARGS (chart network graph) ----------------
+parser = argparse.ArgumentParser(description="Ames housing Cerebros random search (no preprocessing)")
+parser.add_argument("--chart-network-graph", "--shart-network-graph", dest="chart_network_graph", action="store_true", help="Enable plotting/rendering of the neural network graph (accepts legacy typo variant).")
+parser.add_argument("--no-chart-network-graph", dest="chart_network_graph", action="store_false", help="Disable plotting of the neural network graph.")
+parser.set_defaults(chart_network_graph=False)
+known_args, _unknown = parser.parse_known_args()
+
+# Accept key=value forms: chart_network_graph=true / shart_network_graph=true
+def _coerce_bool(v: str) -> bool:
+    return v.lower() in ("1", "true", "yes", "y", "on")
+for raw in sys.argv[1:]:
+    if "=" not in raw:
+        # Accept bare tokens like 'chart-network-graph' / 'shart-network-graph'
+        token = raw.strip().lower()
+        if token in ("chart-network-graph", "shart-network-graph"):
+            known_args.chart_network_graph = True
+        continue
+    k, v = raw.split("=", 1)
+    nk = k.strip().lower().replace("-", "_")
+    if nk in ("chart_network_graph", "shart_network_graph") and _coerce_bool(v):
+        known_args.chart_network_graph = True
 
 
 # white = pd.read_csv('wine_data.csv')
@@ -114,7 +138,8 @@ cerebros =\
         # use_multiprocessing_for_multiple_neural_networks=False,  # pull this param
         model_graphs='model_graphs',
         batch_size=batch_size,
-        meta_trial_number=meta_trial_number)
+        meta_trial_number=meta_trial_number,
+        chart_network_graph=known_args.chart_network_graph)
 result = cerebros.run_random_search()
 
 print("Best model: (May need to re-initialize weights, and retrain with early stopping callback)")

@@ -644,8 +644,12 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
         return best
 
     def get_best_model(self):
-    best_model = tf.keras.models.load_model(self.best_model_path)  # type: ignore[attr-defined]
-    return best_model
+        """Return the best Keras model loaded from its saved path.
+
+        Assumes self.best_model_path was set after search completion. If the
+        path is missing or invalid, raises the underlying load error."""
+        best_model = tf.keras.models.load_model(self.best_model_path)  # type: ignore[attr-defined]
+        return best_model
 
 # ->
 
