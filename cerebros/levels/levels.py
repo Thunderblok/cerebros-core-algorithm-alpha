@@ -15,8 +15,14 @@ from cerebros.nnfuturecomponent.neural_network_future_component\
 from cerebros.denseautomlstructuralcomponent.dense_automl_structural_component \
     import DenseAutoMlStructuralComponent, DenseLateralConnectivity, \
     zero_7_exp_decay, zero_95_exp_decay, simple_sigmoid
-import jax.numpy as jnp
 import numpy as np
+# Provide jnp namespace with graceful fallback if JAX is not installed.
+try:  # pragma: no cover - optional dependency
+    import jax.numpy as jnp  # type: ignore
+except Exception:  # noqa: BLE001
+    import numpy as jnp  # type: ignore
+    def jit(x):  # dummy decorator compatibility if referenced elsewhere
+        return x
 from tensorflow import float32
 
 

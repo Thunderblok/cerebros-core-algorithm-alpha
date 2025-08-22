@@ -1,4 +1,11 @@
 import numpy as np
+# Provide jnp namespace with graceful fallback if JAX is not installed.
+try:  # pragma: no cover
+    import jax.numpy as jnp  # type: ignore
+except Exception:  # noqa: BLE001
+    import numpy as jnp  # type: ignore
+    def jit(x):
+        return x
 import jax.numpy as jnp
 import tensorflow as tf
 from cerebros.nnfuturecomponent.neural_network_future_component import \

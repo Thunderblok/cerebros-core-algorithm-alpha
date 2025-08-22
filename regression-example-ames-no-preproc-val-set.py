@@ -1,10 +1,21 @@
 
 import numpy as np
+import argparse
+import sys
+import os
 # from multiprocessing import Pool  # , Process
 from cerebros.simplecerebrosrandomsearch.simple_cerebros_random_search\
     import SimpleCerebrosRandomSearch
 import pendulum
 import pandas as pd
+
+# Early GPU disable (must precede TF import)
+_argv_lower = [a.lower() for a in sys.argv[1:]]
+if ("--cpu-only" in _argv_lower or "--no-gpu" in _argv_lower or
+        os.environ.get("CEREBROS_CPU_ONLY", "").lower() in ("1", "true", "yes")):
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 import tensorflow as tf
 from cerebros.units.units import DenseUnit
 from cerebros.denseautomlstructuralcomponent.dense_automl_structural_component\
@@ -24,6 +35,30 @@ TIME = pendulum.now().__str__()[:16]\
     .replace(':', '_')\
     .replace('-', '_')
 PROJECT_NAME = f'{TIME}_cerebros_auto_ml_test'
+
+# ---------------- CLI ARGS (chart network graph) ----------------
+parser = argparse.ArgumentParser(description="Ames housing Cerebros random search (no preprocessing, val set)")
+parser.add_argument("--cpu-only", "--no-gpu", dest="cpu_only", action="store_true",
+                    help="Force TensorFlow to run on CPU only (sets CUDA_VISIBLE_DEVICES=-1).")
+parser.add_argument("--chart-network-graph", "--shart-network-graph", dest="chart_network_graph", action="store_true", help="Enable plotting/rendering of the neural network graph (accepts legacy typo variant).")
+parser.add_argument("--no-chart-network-graph", dest="chart_network_graph", action="store_false", help="Disable plotting of the neural network graph.")
+parser.set_defaults(chart_network_graph=False)
+known_args, _unknown = parser.parse_known_args()
+if known_args.cpu_only:
+    try:
+        tf.config.set_visible_devices([], 'GPU')  # type: ignore[arg-type]
+    except Exception:
+        pass
+
+def _coerce_bool(v: str) -> bool:
+    return v.lower() in ("1", "true", "yes", "y", "on")
+for raw in sys.argv[1:]:
+    if "=" not in raw:
+        continue
+    k, v = raw.split("=", 1)
+    nk = k.strip().lower().replace("-", "_")
+    if nk in ("chart_network_graph", "shart_network_graph") and _coerce_bool(v):
+        known_args.chart_network_graph = True
 
 def hash_a_row(row):
     """casts a row of a Pandas DataFrame as a String, hashes it, and casts it
@@ -211,7 +246,8 @@ cerebros =\
         # use_multiprocessing_for_multiple_neural_networks=False,  # pull this param
         model_graphs='model_graphs',
         batch_size=batch_size,
-        meta_trial_number=meta_trial_number)
+    meta_trial_number=meta_trial_number,
+    chart_network_graph=known_args.chart_network_graph)
 result = cerebros.run_random_search()
 
 print("Best model: (May need to re-initialize weights, and retrain with early stopping callback)")

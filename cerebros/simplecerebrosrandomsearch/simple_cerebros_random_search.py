@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -420,15 +419,18 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
 
     def pick_num_units(self):
         return np.random.choice(
-            jnp.arange(self.minimum_units_per_level,
-                       self.maximum_units_per_level + 1))
+            np.arange(self.minimum_units_per_level,
+                      self.maximum_units_per_level + 1))
 
     def parse_prototype_for_level(self,
                                   num_units_this_level):
-        units_neuron_choices =\
-            [np.random.choice(jnp.arange(self.minimum_neurons_per_unit,
-                                         self.maximum_neurons_per_unit + 1))
-             for _ in jnp.arange(num_units_this_level)]
+        units_neuron_choices = [
+            np.random.choice(
+                np.arange(self.minimum_neurons_per_unit,
+                          self.maximum_neurons_per_unit + 1)
+            )
+            for _ in np.arange(num_units_this_level)
+        ]
         level_prototype =\
             [{f"{units}": self.unit_type}
              for units in units_neuron_choices]
@@ -437,29 +439,26 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
     def parse_neural_network_structural_spec_random(self):
 
         __neural_network_spec = {"0": self.inputs}
-        self.num_levels =\
-            np.random.choice(jnp.arange(self.minimum_levels,
-                                        self.maximum_levels + 1))
+        self.num_levels = np.random.choice(
+            np.arange(self.minimum_levels, self.maximum_levels + 1)
+        )
         # __oracle_entry['num_levels'] = self.num_levels
-        last_level = int(jnp.arange(self.num_levels)[-1])
-        for i in jnp.arange(self.num_levels):
+        last_level = int(np.arange(self.num_levels)[-1])
+        for i in np.arange(self.num_levels):
             level_index = str(i + 1)  # 0 is taken by InputLevel
-            num_units_this_level =\
-                self.pick_num_units()
-            for j in jnp.arange(num_units_this_level):
-                if int(i) != last_level:
-                    __neural_network_spec[str(level_index)] =\
-                        self.parse_prototype_for_level(num_units_this_level)  # type: ignore[assignment]
-                else:
-                    __neural_network_spec[str(int(i) + 1)] =\
-                        self.outputs  # type: ignore[assignment]
+            num_units_this_level = self.pick_num_units()
+            # Build levels: overwrite ensures homogenous width per level spec
+            if int(i) != last_level:
+                __neural_network_spec[str(level_index)] = self.parse_prototype_for_level(num_units_this_level)  # type: ignore[assignment]
+            else:
+                __neural_network_spec[str(int(i) + 1)] = self.outputs  # type: ignore[assignment]
 
         self.__neural_network_spec = __neural_network_spec
 
     def get_neural_network_spec(self):
         return self.__neural_network_spec
 
-    def run_moity_permutations(self, spec, subtrial_number, lock):
+    def run_moity_permutations(self, spec, subtrial_number, lock=None):
         # Ensure deterministic seeds per subtrial
         set_global_seed(self.seed + int(subtrial_number))
         model_graph_file = f"{self.project_name}/model_graphs/tr_{str(self.trial_number).zfill(16)}_subtrial_{str(subtrial_number).zfill(16)}.html"
@@ -471,7 +470,8 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
             neural_network_spec=spec,
             project_name=self.project_name,
             trial_number=self.trial_number,
-            subtrial_number=self.subtrial_number,
+            # Use the provided subtrial_number (self.subtrial_number was never updated; previously caused collisions)
+            subtrial_number=subtrial_number,
             base_models=self.base_models,
             activation=self.activation,
             final_activation=self.final_activation,
@@ -597,19 +597,25 @@ class SimpleCerebrosRandomSearch(DenseAutoMlStructuralComponent,
             oracles = []
             processes = []
             subtrial_number = 0
-            lock = Lock()
-            for i in np.arange(
-                    self.number_of_tries_per_architecture_moity):
-                # Fix Process target: do not call function immediately; pass args
-                p = Process(target=self.run_moity_permutations,
-                            args=(spec, int(subtrial_number), lock))
-                processes.append(p)
-                subtrial_number += 1
+            # If only one try per architecture moiety, avoid multiprocessing to
+            # prevent potential hangs / deadlocks with TF+JAX combos and to simplify debugging.
+            if self.number_of_tries_per_architecture_moity == 1:
+                self.run_moity_permutations(spec, int(subtrial_number))
                 self.seed += 1
-            for p in processes:
-                p.start()
-            for p in processes:
-                p.join()
+            else:
+                lock = Lock()
+                for i in np.arange(
+                        self.number_of_tries_per_architecture_moity):
+                    # Fix Process target: do not call function immediately; pass args
+                    p = Process(target=self.run_moity_permutations,
+                                args=(spec, int(subtrial_number), lock))
+                    processes.append(p)
+                    subtrial_number += 1
+                    self.seed += 1
+                for p in processes:
+                    p.start()
+                for p in processes:
+                    p.join()
             # final_oracles = pd.concat(oracles, ignore_index=False)
             # if self.direction == "maximize":
             #     return float(final_oracles[self.metric_to_rank_by].values.max())

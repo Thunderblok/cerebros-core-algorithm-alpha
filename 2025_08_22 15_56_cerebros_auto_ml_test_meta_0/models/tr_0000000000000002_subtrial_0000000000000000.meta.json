@@ -1,0 +1,9 @@
+{
+  "trial_number": 2,
+  "subtrial_number": 0,
+  "project_name": "2025_08_22 15_56_cerebros_auto_ml_test_meta_0",
+  "metric_to_rank_by": "val_root_mean_squared_error",
+  "keras_version": "3.11.2",
+  "tf_version": "2.20.0",
+  "seed": 8675311
+}
