@@ -1,0 +1,7 @@
+trial,val_loss,loss,model_name
+1,1.2,1.25,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
+2,0.95,1.0,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
+3,0.8,0.8500000000000001,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
+4,0.72,0.77,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
+5,0.7,0.75,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
+6,0.69,0.74,/home/mo/cerebros-core-algorithm-alpha-1/demo_ames_project/best_model.keras
